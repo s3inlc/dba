@@ -13,7 +13,7 @@ use PDO,PDOStatement,PDOException;
 /**
  * Abstraction of all ModelFactories.
  * A ModelFactory is used to get all
- * models from Database. It handels the DB calling and caching of objects.
+ * models from Database. It handles the DB calling and caching of objects.
  */
 abstract class AbstractModelFactory {
   /**
@@ -39,17 +39,17 @@ abstract class AbstractModelFactory {
   abstract function getModelTable();
   
   /**
-   * Returns weither the associated model is cachable or not
+   * Returns wether the associated model is able to be cached or not
    *
    * @return boolean True, if the object might be cached, False if not
    */
   abstract function isCachable();
   
   /**
-   * Returns weither the models valid time on cache.
+   * Returns wether the models valid time on cache.
    *
    * Returns the time in seconds a object might life on the cache.
-   * If the model shouldn't be cachable -1 shall be returned
+   * If the model should not be cachable -1 shall be returned
    *
    * @return int valid time in seconds, -1 if model shouldn't be cached
    */
@@ -93,7 +93,7 @@ abstract class AbstractModelFactory {
   public function save($model) {
     $dict = $model->getKeyValueDict();
     
-    $query = "INSERT INTO " . $this->getModelTable() . "(";
+    $query = "INSERT INTO " . $this->getModelTable() . " (";
     $keys = array_keys($dict);
     $vals = array_values($dict);
     
@@ -168,7 +168,7 @@ abstract class AbstractModelFactory {
    *
    * This function returns the model with the given primary key or null.
    * If the model is specified to be non-cached, this function will call
-   * the getFromDB() function and retrn it's result. It's therefor recommended
+   * the getFromDB() function and return it's result. It's therefor recommended
    * to use this function
    *
    * @param $pk string primary key
@@ -359,7 +359,7 @@ abstract class AbstractModelFactory {
     $otherTable = $jO->getOtherFactory()->getModelTable();
     $otherTablePrefixed = Util::createPrefixedString($otherTable, $this->getPrefixedKeys($otherTable));
     
-    // Get macthing colums
+    // Get matching colums
     $match1 = $jO->getMatch1();
     $match2 = $jO->getMatch2();
     $query = "SELECT " . $ownTablePrefixed . " , " . $otherTablePrefixed . " FROM " . $ownTable . " AS " . $ownTable . " INNER JOIN " . $otherTable . " ON " . $ownTable . "." . $match1 . "=" . $otherTable . "." . $match2;
@@ -490,7 +490,7 @@ abstract class AbstractModelFactory {
   /**
    * Deletes the given model
    *
-   * This function deletes the given and also cleanes the cache from it.
+   * This function deletes the given and also cleans the cache from it.
    * It returns the return of the execute query.
    * @param $model AbstractModel
    * @return bool

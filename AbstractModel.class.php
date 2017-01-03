@@ -27,7 +27,7 @@ abstract class AbstractModel {
   abstract function getPrimaryKeyValue();
   
   /**
-   * This function is used to set the id to the real databse value
+   * This function is used to set the id to the real database value
    * @param $id string
    * @return
    */
