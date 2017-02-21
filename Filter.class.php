@@ -15,4 +15,6 @@ abstract class Filter {
    * @return string
    */
   abstract function getQueryString($table = "");
+  abstract function getValue();
+  abstract function getHasValue();
 }

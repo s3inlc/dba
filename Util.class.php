@@ -11,14 +11,22 @@ namespace DBA;
 
 class Util {
   /**
-   * @param $obj Object
+   * TODO: document me
+   * @param $obj
    * @param $to_class
-   * @return Object
+   * @return mixed|null
    */
   public static function cast($obj, $to_class) {
-    if (class_exists($to_class)) {
+    if($obj == null){
+      return null;
+    }
+    else if (class_exists($to_class)) {
       $obj_in = serialize($obj);
-      $obj_out = 'O:' . strlen($to_class) . ':"' . $to_class . '":' . substr($obj_in, $obj_in[2] + 7);
+      $obj_in_split = explode(":", $obj_in);
+      unset($obj_in_split[0]);
+      unset($obj_in_split[1]);
+      unset($obj_in_split[2]);
+      $obj_out = 'O:' . strlen($to_class) . ':"' . $to_class . '":' . implode(":", $obj_in_split);
       return unserialize($obj_out);
     }
     else {
@@ -27,7 +35,7 @@ class Util {
   }
   
   /**
-   * TODO Document me
+   * TODO: Document me
    * @param $table string
    * @param $dict array
    * @return string

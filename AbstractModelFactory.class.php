@@ -8,7 +8,8 @@
  */
 
 namespace DBA;
-use PDO,PDOStatement,PDOException;
+
+use PDO, PDOStatement, PDOException;
 
 /**
  * Abstraction of all ModelFactories.
@@ -93,11 +94,12 @@ abstract class AbstractModelFactory {
   public function save($model) {
     $dict = $model->getKeyValueDict();
     
-    $query = "INSERT INTO " . $this->getModelTable() . " (";
+    $query = "INSERT INTO " . $this->getModelTable();
     $keys = array_keys($dict);
     $vals = array_values($dict);
     
     $placeHolder = "(";
+    $query .= " (";
     for ($i = 0; $i < count($keys); $i++) {
       if ($i != count($keys) - 1) {
         $query = $query . $keys[$i] . ",";
@@ -125,6 +127,48 @@ abstract class AbstractModelFactory {
     else {
       return null;
     }
+  }
+  
+  /**
+   * @param $arr array
+   * @return Filter[]
+   */
+  private function getFilters($arr) {
+    if (!is_array($arr['filter'])) {
+      $arr['filter'] = array($arr['filter']);
+    }
+    if (isset($arr['filter'])) {
+      return $arr['filter'];
+    }
+    return array();
+  }
+  
+  /**
+   * @param $arr array
+   * @return Order[]
+   */
+  private function getOrders($arr) {
+    if (!is_array($arr['order'])) {
+      $arr['order'] = array($arr['order']);
+    }
+    if (isset($arr['order'])) {
+      return $arr['order'];
+    }
+    return array();
+  }
+  
+  /**
+   * @param $arr array
+   * @return Join[]
+   */
+  private function getJoins($arr) {
+    if (!is_array($arr['join'])) {
+      $arr['join'] = array($arr['join']);
+    }
+    if (isset($arr['join'])) {
+      return $arr['join'];
+    }
+    return array();
   }
   
   /**
@@ -161,6 +205,116 @@ abstract class AbstractModelFactory {
     $stmt = $this->getDB()->prepare($query);
     $stmt->execute($values);
     return $stmt;
+  }
+  
+  /**
+   * @param $models AbstractModel[]
+   * @return bool|PDOStatement
+   */
+  public function massSave($models) {
+    if (sizeof($models) == 0) {
+      return false;
+    }
+    $dict = $models[0]->getKeyValueDict();
+    
+    $query = "INSERT INTO " . $this->getModelTable();
+    $query .= "( ";
+    $keys = array_keys($dict);
+    
+    $placeHolder = "(";
+    for ($i = 0; $i < count($keys); $i++) {
+      if ($i != count($keys) - 1) {
+        $query = $query . $keys[$i] . ",";
+        $placeHolder = $placeHolder . "?,";
+      }
+      else {
+        $query = $query . $keys[$i];
+        $placeHolder = $placeHolder . "?";
+      }
+    }
+    $query = $query . ")";
+    $placeHolder = $placeHolder . ")";
+    
+    $query = $query . " VALUES ";
+    $vals = array();
+    for ($x = 0; $x < sizeof($models); $x++) {
+      $query .= $placeHolder;
+      if ($x < sizeof($models) - 1) {
+        $query .= ", ";
+      }
+      if ($models[$x]->getId() == 0) {
+        $models[$x]->setId(null);
+      }
+      $dict = $models[$x]->getKeyValueDict();
+      foreach (array_values($dict) as $val) {
+        $vals[] = $val;
+      }
+    }
+    
+    $dbh = self::getDB();
+    $stmt = $dbh->prepare($query);
+    $stmt->execute($vals);
+    return $stmt;
+  }
+  
+  public function sumFilter($options, $sumColumn) {
+    $query = "SELECT SUM($sumColumn) AS sum ";
+    $query = $query . " FROM " . $this->getModelTable();
+    
+    $vals = array();
+    
+    if (array_key_exists("filter", $options)) {
+      $query .= $this->applyFilters($vals, $options['filter']);
+    }
+    
+    if (!array_key_exists("order", $options)) {
+      // Add a asc order on the primary keys as a standard
+      $oF = new OrderFilter($this->getNullObject()->getPrimaryKey(), "ASC");
+      $orderOptions = array(
+        $oF
+      );
+      $options['order'] = $orderOptions;
+    }
+    if (count($options['order']) != 0) {
+      $query .= $this->applyOrder($this->getOrders($options));
+    }
+    
+    $dbh = self::getDB();
+    $stmt = $dbh->prepare($query);
+    $stmt->execute($vals);
+    
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    return $row['sum'];
+  }
+  
+  public function countFilter($options) {
+    $query = "SELECT COUNT(*) AS count ";
+    $query = $query . " FROM " . $this->getModelTable();
+    
+    $vals = array();
+    
+    if (array_key_exists("filter", $options)) {
+      $query .= $this->applyFilters($vals, $options['filter']);
+    }
+    
+    if (!array_key_exists("order", $options)) {
+      // Add a asc order on the primary keys as a standard
+      $oF = new OrderFilter($this->getNullObject()->getPrimaryKey(), "ASC");
+      $orderOptions = array(
+        $oF
+      );
+      $options['order'] = $orderOptions;
+    }
+    if (count($options['order']) != 0) {
+      $query .= $this->applyOrder($options['order']);
+    }
+    
+    $dbh = self::getDB();
+    $stmt = $dbh->prepare($query);
+    $stmt->execute($vals);
+    
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    return $row['count'];
   }
   
   /**
@@ -240,147 +394,43 @@ abstract class AbstractModelFactory {
    * $options['join'] is an array of JoinFilter options
    *
    * @param $options array containing option settings
-   * @param $single bool result should be one single row
    * @return AbstractModel[]|AbstractModel Returns a list of matching objects or Null
    */
-  public function filter($options, $single = false) {
-    // Check if we need to join and if so pass on to internal Function
-    if (array_key_exists('join', $options)) {
-      return $this->filterWithJoin($options);
-    }
-    else {
-      $query = "SELECT ";
-      $query = $query . $this->getNullObject()->getPrimaryKey() . ",";
-      $keys = array_keys($this->getNullObject()->getKeyValueDict());
-      
-      for ($i = 0; $i < count($keys); $i++) {
-        if ($i != count($keys) - 1) {
-          $query = $query . $keys[$i] . ",";
-        }
-        else {
-          $query = $query . $keys[$i];
-        }
-      }
-      $query = $query . " FROM " . $this->getModelTable();
-      
-      $vals = array();
-      
-      if (array_key_exists("filter", $options)) {
-        $query = $query . " WHERE ";
-        
-        
-        $filterOptions = $options['filter'];
-        $vals = array();
-        
-        for ($i = 0; $i < count($filterOptions); $i++) {
-          $option = Util::cast($filterOptions[$i], Filter::class);
-          if ($option->getValue() != null) {
-            array_push($vals, $option->getValue());
-          }
-          
-          if ($i != count($filterOptions) - 1) {
-            $query = $query . $option->getQueryString() . " AND ";
-          }
-          else {
-            $query = $query . $option->getQueryString();
-          }
-        }
-      }
-      
-      if (!array_key_exists("order", $options)) {
-        // Add a asc order on the primary keys as a standard
-        $oF = new OrderFilter($this->getNullObject()->getPrimaryKey(), "ASC");
-        $orderOptions = array(
-          $oF
-        );
-        $options['order'] = $orderOptions;
-      }
-      if (count($options['order']) != 0) {
-        $query = $query . " ORDER BY ";
-        $orderOptions = $options['order'];
-        
-        for ($i = 0; $i < count($orderOptions); $i++) {
-          if ($i != count($orderOptions) - 1) {
-            $order = $orderOptions[$i];
-            $query = $query . $order->getQueryString() . ",";
-          }
-          else {
-            $order = $orderOptions[$i];
-            $query = $query . $order->getQueryString();
-          }
-        }
-      }
-      
-      $dbh = $this->getDB();
-      $stmt = $dbh->prepare($query);
-      $stmt->execute($vals);
-      
-      $objects = array();
-      
-      // Loop over all entries and create an object from dict for each
-      while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-        $pkName = $this->getNullObject()->getPrimaryKey();
-        
-        $pk = $row[$pkName];
-        $model = $this->createObjectFromDict($pk, $row);
-        array_push($objects, $model);
-      }
-      
-      if ($single) {
-        if (sizeof($single) == 0) {
-          return null;
-        }
-        else {
-          return $objects[0];
-        }
-      }
-      
-      return $objects;
-    }
-  }
-  
-  /**
-   * Private function used to compute a filter when a join is used.
-   * This is put here to avoid putting too much stuff in the filter
-   * method. It should only be called from filter()
-   * @param $options array
-   * @return array
-   */
   private function filterWithJoin($options) {
-    $joinOptions = $options['join'];
+    $joins = $this->getJoins($options);
+    if (!is_array($joins)) {
+      $joins = array($joins);
+    }
+    $keys = array_keys($this->getNullObject()->getKeyValueDict());
+    $prefixedKeys = array();
+    $factories = array($this);
+    foreach ($keys as $key) {
+      $prefixedKeys[] = $this->getModelTable() . "." . $key;
+      $tables[] = $this->getModelTable();
+    }
+    $query = "SELECT " . Util::createPrefixedString($this->getModelTable(), $this->getNullObject()->getKeyValueDict());
+    foreach ($joins as $join) {
+      $joinFactory = $join->getOtherFactory();
+      $factories[] = $joinFactory;
+      $query .= ", " . Util::createPrefixedString($joinFactory->getModelTable(), $joinFactory->getNullObject()->getKeyValueDict());
+    }
+    $query .= " FROM " . $this->getModelTable();
     
-    $jO = Util::cast($joinOptions[0], JoinFilter::class);
-    // Get own tables with prefixes
-    $ownTable = $this->getModelTable();
-    $ownTablePrefixed = Util::createPrefixedString($ownTable, $this->getPrefixedKeys($ownTable));
-    
-    // Get other tables prefixes and information
-    $otherFactory = Util::cast($jO->getOtherFactory(), AbstractModelFactory::class);
-    $otherTable = $jO->getOtherFactory()->getModelTable();
-    $otherTablePrefixed = Util::createPrefixedString($otherTable, $this->getPrefixedKeys($otherTable));
-    
-    // Get matching colums
-    $match1 = $jO->getMatch1();
-    $match2 = $jO->getMatch2();
-    $query = "SELECT " . $ownTablePrefixed . " , " . $otherTablePrefixed . " FROM " . $ownTable . " AS " . $ownTable . " INNER JOIN " . $otherTable . " ON " . $ownTable . "." . $match1 . "=" . $otherTable . "." . $match2;
-    
-    $vals = array();
-    // Apply all normal filter to this query
-    if (array_key_exists("filter", $options)) {
-      $query = $query . " WHERE ";
-      $filterOptions = $options['filter'];
-      
-      for ($i = 0; $i < count($filterOptions); $i++) {
-        $option = Util::cast($filterOptions[$i], Filter::class);
-        array_push($vals, $option->getValue());
-        
-        if ($i != count($filterOptions) - 1) {
-          $query = $query . $option->getQueryString($ownTable) . " AND ";
-        }
-        else {
-          $query = $query . $option->getQueryString($ownTable);
-        }
+    foreach ($joins as $join) {
+      $joinFactory = $join->getOtherFactory();
+      $localFactory = $this;
+      if ($join->getOverrideOwnFactory() != null) {
+        $localFactory = $join->getOverrideOwnFactory();
       }
+      $match1 = $join->getMatch1();
+      $match2 = $join->getMatch2();
+      $query .= " INNER JOIN " . $joinFactory->getModelTable() . " ON " . $localFactory->getModelTable() . "." . $match1 . "=" . $joinFactory->getModelTable() . "." . $match2 . " ";
+    }
+    
+    // Apply all normal filter to this query
+    $vals = array();
+    if (array_key_exists("filter", $options)) {
+      $query .= $this->applyFilters($vals, $options['filter']);
     }
     
     // Apply order filter
@@ -392,99 +442,127 @@ abstract class AbstractModelFactory {
       );
       $options['order'] = $orderOptions;
     }
-    if (count($options['order']) != 0) {
-      $query = $query . " ORDER BY ";
-      $orderOptions = $options['order'];
-      
-      for ($i = 0; $i < count($orderOptions); $i++) {
-        if ($i != count($orderOptions) - 1) {
-          $order = $orderOptions[$i];
-          $query = $query . $order->getQueryString($ownTable) . ",";
-        }
-        else {
-          $order = $orderOptions[$i];
-          $query = $query . $order->getQueryString($ownTable);
-        }
-      }
-    }
+    $query .= $this->applyOrder($options['order']);
     
-    $dbh = $this->getDB();
+    
+    $dbh = self::getDB();
     $stmt = $dbh->prepare($query);
     $stmt->execute($vals);
     
-    // Seperate each table into two dict to create the corresponding OBJECTS
-    $ownTablePref = $ownTable . ".";
-    $otherTablePref = $otherTable . ".";
-    
     $res = array();
-    $res[$ownTable] = array();
-    $res[$otherTable] = array();
+    $primaryKey = array();
+    $values = array();
+    foreach ($factories as $factory) {
+      $res[$factory->getModelTable()] = array();
+      $values[$factory->getModelTable()] = array();
+    }
     
     while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-      $ownKeys = array();
-      $ownPk = null;
-      
-      $otherKeys = array();
-      $otherPk = null;
-      
       foreach ($row as $k => $v) {
-        if (Util::startsWith($k, $ownTablePref)) {
-          $nK = str_replace($ownTablePref, "", $k);
-          if ($nK != $this->getNullObject()->getPrimaryKey()) {
-            $ownKeys[$nK] = $v;
-          }
-          else {
-            $ownPk = $v;
-          }
-        }
-        else if (Util::startsWith($k, $otherTablePref)) {
-          $nK = str_replace($otherTablePref, "", $k);
-          if ($nK != $otherFactory->getNullObject()->getPrimaryKey()) {
-            $otherKeys[$nK] = $v;
-          }
-          else {
-            $otherPk = $v;
+        foreach ($factories as $factory) {
+          if (Util::startsWith($k, $factory->getModelTable())) {
+            $column = str_replace($factory->getModelTable() . ".", "", $k);
+            if ($column != $factory->getNullObject()->getPrimaryKey()) {
+              $values[$factory->getModelTable()][$column] = $v;
+            }
+            else {
+              $primaryKey[$factory->getModelTable()] = $v;
+            }
           }
         }
       }
       
-      $ownModel = $this->createObjectFromDict($ownPk, $ownKeys);
-      $otherModel = $otherFactory->createObjectFromDict($otherPk, $otherKeys);
-      
-      array_push($res[$ownTable], $ownModel);
-      array_push($res[$otherTable], $otherModel);
+      foreach ($factories as $factory) {
+        $model = $factory->createObjectFromDict($primaryKey[$factory->getModelTable()], $values[$factory->getModelTable()]);
+        array_push($res[$factory->getModelTable()], $model);
+      }
     }
     
     return $res;
   }
   
-  /**
-   * This function gives back a dict with all colums in the table
-   * and their prefixed equivalent.
-   *
-   * As an example, the column "name" in "user" becomes "name" => "user.name"
-   * @param $table string table name
-   * @return array
-   */
-  private function getPrefixedKeys($table) {
-    $dbh = $this->getDB();
-    
-    $query = "DESCRIBE `$table`"; // For whatever reason, prepared statements are not working on this one. Or i'm to stupid.
-    
-    $stmt = $dbh->prepare($query);
-    $stmt->execute(array(
-        $table
-      )
-    );
-    
-    $dict = array();
-    $fields = $stmt->fetchAll(PDO::FETCH_COLUMN);
-    
-    foreach ($fields as $f) {
-      $dict[$f] = "`" . $table . "." . $f . "`";
+  public function filter($options, $single = false) {
+    // Check if we need to join and if so pass on to internal Function
+    if (array_key_exists('join', $options)) {
+      return $this->filterWithJoin($options);
     }
     
-    return $dict;
+    $keys = array_keys($this->getNullObject()->getKeyValueDict());
+    $query = "SELECT " . implode(", ", $keys) . " FROM " . $this->getModelTable();
+    $vals = array();
+    
+    if (array_key_exists("filter", $options)) {
+      $query .= $this->applyFilters($vals, $options['filter']);
+    }
+    
+    if (!array_key_exists("order", $options)) {
+      // Add a asc order on the primary keys as a standard
+      $oF = new OrderFilter($this->getNullObject()->getPrimaryKey(), "ASC");
+      $orderOptions = array($oF);
+      $options['order'] = $orderOptions;
+    }
+    $query .= $this->applyOrder($options['order']);
+    
+    $dbh = self::getDB();
+    $stmt = $dbh->prepare($query);
+    $stmt->execute($vals);
+    
+    $objects = array();
+    
+    // Loop over all entries and create an object from dict for each
+    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+      $pkName = $this->getNullObject()->getPrimaryKey();
+      
+      $pk = $row[$pkName];
+      $model = $this->createObjectFromDict($pk, $row);
+      array_push($objects, $model);
+    }
+    
+    if ($single) {
+      if (sizeof($objects) == 0) {
+        return null;
+      }
+      else {
+        return $objects[0];
+      }
+    }
+    
+    return $objects;
+  }
+  
+  private function applyFilters(&$vals, $filters) {
+    $parts = array();
+    if (!is_array($filters)) {
+      $filters = array($filters);
+    }
+    
+    foreach ($filters as $filter) {
+      $parts[] = $filter->getQueryString();
+      if (!$filter->getHasValue()) {
+        continue;
+      }
+      $v = $filter->getValue();
+      if (is_array($v)) {
+        foreach ($v as $val) {
+          array_push($vals, $val);
+        }
+      }
+      else {
+        array_push($vals, $v);
+      }
+    }
+    return " WHERE " . implode(" AND ", $parts);
+  }
+  
+  private function applyOrder($orders) {
+    $orderQueries = array();
+    if (!is_array($orders)) {
+      $orders = array($orders);
+    }
+    foreach ($orders as $order) {
+      $orderQueries[] = $order->getQueryString($this->getModelTable());
+    }
+    return " ORDER BY " . implode(", ", $orderQueries);
   }
   
   /**
@@ -517,29 +595,50 @@ abstract class AbstractModelFactory {
     $vals = array();
     
     if (array_key_exists("filter", $options)) {
-      $query = $query . " WHERE ";
-      
-      
-      $filterOptions = $options['filter'];
-      $vals = array();
-      
-      for ($i = 0; $i < count($filterOptions); $i++) {
-        $option = Util::cast($filterOptions[$i], Filter::class);
-        array_push($vals, $option->getValue());
-        
-        if ($i != count($filterOptions) - 1) {
-          $query = $query . $option->getQueryString() . " AND ";
-        }
-        else {
-          $query = $query . $option->getQueryString();
-        }
-      }
+      $query .= $this->applyFilters($vals, $this->getFilters($options));
     }
     
     $dbh = $this->getDB();
     $stmt = $dbh->prepare($query);
     $stmt->execute($vals);
     return $stmt;
+  }
+  
+  public function massUpdate($options) {
+    $query = "UPDATE " . $this->getModelTable();
+    
+    $vals = array();
+    
+    if (array_key_exists("update", $options)) {
+      $query = $query . " SET ";
+      
+      
+      $updateOptions = $options['update'];
+      if (!is_array($updateOptions)) {
+        $updateOptions = array($updateOptions);
+      }
+      $vals = array();
+      
+      for ($i = 0; $i < count($updateOptions); $i++) {
+        $option = $updateOptions[$i];
+        array_push($vals, $option->getValue());
+        
+        if ($i != count($updateOptions) - 1) {
+          $query = $query . $option->getQuery() . " , ";
+        }
+        else {
+          $query = $query . $option->getQuery();
+        }
+      }
+    }
+    
+    if (array_key_exists("filter", $options)) {
+      $query .= $this->applyFilters($vals, $options['filter']);
+    }
+    
+    $dbh = self::getDB();
+    $stmt = $dbh->prepare($query);
+    return $stmt->execute($vals);
   }
   
   /**

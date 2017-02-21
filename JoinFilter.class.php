@@ -31,19 +31,29 @@ class JoinFilter extends Join  {
   private $otherTableName;
   
   /**
+   * @var AbstractModelFactory
+   */
+  private $overrideOwnFactory;
+  
+  /**
    * JoinFilter constructor.
    * @param $otherFactory AbstractModelFactory
    * @param $matching1 string
    * @param $matching2 string
+   * @param $overrideOwnFactory AbstractModelFactory
    */
-  function __construct($otherFactory, $matching1, $matching2) {
+  function __construct($otherFactory, $matching1, $matching2, $overrideOwnFactory = null) {
     $this->otherFactory = $otherFactory;
     $this->match1 = $matching1;
     $this->match2 = $matching2;
     
     $this->otherTableName = $this->otherFactory->getModelTable();
+    $this->overrideOwnFactory = $overrideOwnFactory;
   }
   
+  /**
+   * @return AbstractModelFactory
+   */
   function getOtherFactory() {
     return $this->otherFactory;
   }
@@ -58,6 +68,13 @@ class JoinFilter extends Join  {
   
   function getOtherTableName() {
     return $this->otherTableName;
+  }
+  
+  /**
+   * @return AbstractModelFactory
+   */
+  function getOverrideOwnFactory(){
+      return $this->overrideOwnFactory;
   }
 }
 
